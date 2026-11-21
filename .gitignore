@@ -3,3 +3,4 @@ __pycache__/
 data.db
 .env
 *.log
+docs/gmssl/key.pem
