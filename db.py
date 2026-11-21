@@ -92,7 +92,19 @@ CREATE TABLE IF NOT EXISTS dict_item (
   sort  INTEGER DEFAULT 0,
   UNIQUE (type, code)
 );
-"""
+-- 审计日志只增不改：任何 UPDATE / DELETE 都被数据库拒绝
+CREATE TRIGGER IF NOT EXISTS trg_audit_no_update
+BEFORE UPDATE ON audit_log
+BEGIN
+  SELECT RAISE(ABORT, 'audit_log is append-only: UPDATE is not allowed');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_audit_no_delete
+BEFORE DELETE ON audit_log
+BEGIN
+  SELECT RAISE(ABORT, 'audit_log is append-only: DELETE is not allowed');
+END;
+"""    # 结束 SCHEMA
 
 # 角色 → 权限（三员与业务岗严格分离）
 ROLE_PERMS = {

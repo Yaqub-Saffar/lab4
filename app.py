@@ -806,6 +806,55 @@ def doc_process(did):
         flash("只有接收人在签收后才能处理")
     conn.close()
     return redirect(url_for("doc_detail", did=did))
+# ---------------------------------------------------------------- M7 审计日志
+@app.route("/logs")
+@require_perm("log.view")
+def logs():
+    username = request.args.get("username", "").strip()
+    action = request.args.get("action", "").strip()
+    result = request.args.get("result", "").strip()
+    page = max(1, int(request.args.get("page", "1") or 1))
+    PER_PAGE = 30
+
+    where, args = [], []
+    if username:
+        where.append("username LIKE ?"); args.append("%" + username + "%")
+    if action:
+        where.append("action LIKE ?"); args.append("%" + action + "%")
+    if result:
+        where.append("result = ?"); args.append(result)
+
+    cond = (" WHERE " + " AND ".join(where)) if where else ""
+    conn = db.connect()
+    total = conn.execute("SELECT COUNT(*) FROM audit_log" + cond, args).fetchone()[0]
+    rows = conn.execute(
+        "SELECT * FROM audit_log" + cond + " ORDER BY id DESC LIMIT ? OFFSET ?",
+        args + [PER_PAGE, (page - 1) * PER_PAGE]).fetchall()
+    actions = [r["action"] for r in conn.execute(
+        "SELECT DISTINCT action FROM audit_log ORDER BY action")]
+    conn.close()
+    pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
+    return render_template("logs.html", rows=rows, total=total, page=page, pages=pages,
+                           actions=actions, username=username, action=action, result=result)
+
+
+@app.route("/logs/export")
+@require_perm("log.view")
+def logs_export():
+    conn = db.connect()
+    rows = conn.execute("SELECT ts,user_id,username,role,action,object_type,object_id,"
+                        "result,ip,detail FROM audit_log ORDER BY id").fetchall()
+    conn.close()
+    lines = ["时间,用户ID,用户名,角色,动作,对象类型,对象编号,结果,IP,详情"]
+    for r in rows:
+        vals = [str(r[i] if r[i] is not None else "") for i in range(len(r))]
+        vals = ['"' + v.replace('"', '""') + '"' if ("," in v or '"' in v) else v for v in vals]
+        lines.append(",".join(vals))
+    body = "\ufeff" + "\n".join(lines)   # BOM 让 Excel 正确识别 UTF-8
+    audit(conn=None) if False else None
+    return (body, 200, {"Content-Type": "text/csv; charset=utf-8",
+                        "Content-Disposition": "attachment; filename=audit_log.csv"})
+
 if __name__ == "__main__":
     if not os.path.exists(db.DB_PATH):
         db.init_db()
