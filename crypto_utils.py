@@ -105,3 +105,40 @@ def wrap_privkey(priv_hex: str, kek: bytes) -> str:
 def unwrap_privkey(blob: str, kek: bytes) -> str:
     raw = base64.b64decode(blob)
     return sm4_decrypt(kek[:16], raw[:16], raw[16:]).hex()
+
+# ---------------- 国标 SM2 签名（带 ZA） ----------------
+# gmssl 库的 sign/verify 接收的是"已经算好的 e"，而国标要求
+# e = SM3(ZA || M)，ZA = SM3(ENTL || ID || a || b || Gx || Gy || Px || Py)。
+# 下面两个函数补齐 ZA 计算，使签名与 GmSSL / 国密标准真正互通。
+SM2_DEFAULT_ID = b"1234567812345678"
+
+
+def sm2_za(pub_hex: str) -> bytes:
+    """用户标识杂凑值 ZA（默认 ID 1234567812345678）"""
+    entl = (len(SM2_DEFAULT_ID) * 8).to_bytes(2, "big")
+    t = sm2.default_ecc_table
+    a = bytes.fromhex(t["a"]); b = bytes.fromhex(t["b"])
+    g = bytes.fromhex(t["g"])
+    gx, gy = g[:32], g[32:]
+    pk = bytes.fromhex(pub_hex)
+    px, py = pk[:32], pk[32:]
+    return bytes.fromhex(sm3_hex(entl + SM2_DEFAULT_ID + a + b + gx + gy + px + py))
+
+
+def sm2_hash_msg(pub_hex: str, msg: bytes) -> bytes:
+    """国标 e = SM3(ZA || M)"""
+    return bytes.fromhex(sm3_hex(sm2_za(pub_hex) + msg))
+
+
+def sm2_sign_std(priv: str, pub: str, msg: bytes) -> str:
+    """按国标签名的 SM2（返回 r||s 的 hex）"""
+    e = sm2_hash_msg(pub, msg)
+    c = sm2.CryptSM2(private_key=priv, public_key=pub)
+    return c.sign(e, func.random_hex(64))
+
+
+def sm2_verify_std(pub: str, sig: str, msg: bytes) -> bool:
+    """按国标验签"""
+    e = sm2_hash_msg(pub, msg)
+    c = sm2.CryptSM2(private_key="", public_key=pub)
+    return bool(c.verify(sig, e))

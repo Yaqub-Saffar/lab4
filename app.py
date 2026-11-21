@@ -488,7 +488,7 @@ def _verify_doc(conn, d, env):
     sender = conn.execute("SELECT sm2_pub FROM user WHERE id=?", (d["sender_id"],)).fetchone()
     if not sender:
         return False, "找不到发送方公钥"
-    ok = cu.sm2_verify(sender["sm2_pub"], env["signature"], digest_now.encode("utf-8"))
+    ok = cu.sm2_verify_std(sender["sm2_pub"], env["signature"], digest_now.encode("utf-8"))
     return (True, "验签通过") if ok else (False, "SM2 验签失败（签名与内容不匹配）")
 
 # ---------------------------------------------------------------- M4 发文
@@ -726,7 +726,7 @@ def doc_send(did):
             return "会话密钥已失效，请重新登录后再发送", 403
         sender_pub = conn.execute("SELECT sm2_pub FROM user WHERE id=?",
                                   (d["sender_id"],)).fetchone()["sm2_pub"]
-        signature = cu.sm2_sign(sess_key["priv"], sender_pub, digest.encode("utf-8"))
+        signature = cu.sm2_sign_std(sess_key["priv"], sender_pub, digest.encode("utf-8"))
         conn.execute("UPDATE doc SET status='SENT', sent_at=?, digest=? WHERE id=?",
                      (now(), digest, did))
         conn.execute("UPDATE doc_envelope SET signature=?, signer_id=? WHERE doc_id=?",
