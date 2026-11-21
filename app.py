@@ -706,6 +706,64 @@ def doc_send(did):
         flash("只有审核通过的本人公文才能发送")
     conn.close()
     return redirect(url_for("doc_detail", did=did))
+# ---------------------------------------------------------------- M5 收文
+@app.route("/inbox")
+@require_perm("doc.receive")
+def inbox():
+    q = request.args.get("q", "").strip()
+    status = request.args.get("status", "")
+    sql = ("SELECT d.*, s.real_name AS sender_name FROM doc d"
+           " LEFT JOIN user s ON s.id=d.sender_id"
+           " WHERE d.receiver_id=? AND d.status IN ('SENT','RECEIVED','PROCESSED')")
+    args = [session["user"]["id"]]
+    if q:
+        sql += " AND d.title LIKE ?"; args.append("%" + q + "%")
+    if status:
+        sql += " AND d.status=?"; args.append(status)
+    sql += " ORDER BY d.sent_at DESC"
+    conn = db.connect()
+    docs = conn.execute(sql, args).fetchall()
+    conn.close()
+    return render_template("inbox.html", docs=docs, q=q, status=status,
+                           status_label=STATUS_LABEL)
+
+
+@app.route("/doc/<int:did>/sign", methods=["POST"])
+@require_perm("doc.sign")
+def doc_sign(did):
+    """签收：只有接收人、且状态为已发送时可签收"""
+    conn = db.connect()
+    d = conn.execute("SELECT * FROM doc WHERE id=?", (did,)).fetchone()
+    if d and d["receiver_id"] == session["user"]["id"] and d["status"] == "SENT":
+        conn.execute("UPDATE doc SET status='RECEIVED', received_at=? WHERE id=?", (now(), did))
+        conn.commit()
+        audit(conn, "DOC_SIGN", "doc", did, "SUCCESS", d["doc_no"])
+        flash("已签收")
+    else:
+        audit(conn, "DOC_SIGN", "doc", did, "DENIED", "非接收人或状态不符")
+        flash("只有接收人才能签收已发送的公文")
+    conn.close()
+    return redirect(url_for("doc_detail", did=did))
+
+
+@app.route("/doc/<int:did>/process", methods=["POST"])
+@require_perm("doc.sign")
+def doc_process(did):
+    """处理：接收人签收后填写处理意见并办结"""
+    note = request.form.get("note", "").strip()
+    conn = db.connect()
+    d = conn.execute("SELECT * FROM doc WHERE id=?", (did,)).fetchone()
+    if d and d["receiver_id"] == session["user"]["id"] and d["status"] == "RECEIVED":
+        conn.execute("UPDATE doc SET status='PROCESSED', processed_at=?, review_note=?"
+                     " WHERE id=?", (now(), "处理意见：" + (note or "已阅办"), did))
+        conn.commit()
+        audit(conn, "DOC_PROCESS", "doc", did, "SUCCESS", "意见：%s" % (note or "已阅办"))
+        flash("已办结")
+    else:
+        audit(conn, "DOC_PROCESS", "doc", did, "DENIED", "非接收人或状态不符")
+        flash("只有接收人在签收后才能处理")
+    conn.close()
+    return redirect(url_for("doc_detail", did=did))
 if __name__ == "__main__":
     if not os.path.exists(db.DB_PATH):
         db.init_db()

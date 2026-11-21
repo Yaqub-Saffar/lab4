@@ -13,7 +13,7 @@
     <a href="{{ url_for('dashboard') }}">工作台</a>
     {% if 'doc.draft' in perms %}<a href="{{ url_for('docs_mine') }}">我的发文</a><a href="{{ url_for('doc_new') }}">起草</a>{% endif %}
     {% if 'doc.approve' in perms %}<a href="{{ url_for('review_list') }}">待审</a>{% endif %}
-    {% if 'doc.receive' in perms %}<a href="#">收文（M5）</a>{% endif %}
+    {% if 'doc.receive' in perms %}<a href="{{ url_for('inbox') }}">我的收文</a>{% endif %}
     {% if 'org.manage' in perms %}<a href="{{ url_for('admin_orgs') }}">组织单位</a>{% endif %}
     {% if 'user.manage' in perms %}<a href="{{ url_for('admin_users') }}">用户管理</a>{% endif %}
     {% if 'perm.manage' in perms %}<a href="{{ url_for('sec_perms') }}">权限设置</a>{% endif %}

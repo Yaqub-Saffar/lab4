@@ -46,6 +46,15 @@
   <form method="post" action="{{ url_for('doc_send', did=d['id']) }}" class="inline">
     <button class="small" type="submit">发送</button>
   </form>
+  {% elif d['status'] == 'SENT' and d['receiver_id'] == session['user']['id'] %}
+  <form method="post" action="{{ url_for('doc_sign', did=d['id']) }}" class="inline">
+    <button class="small" type="submit">签收</button>
+  </form>
+  {% elif d['status'] == 'RECEIVED' and d['receiver_id'] == session['user']['id'] %}
+  <form method="post" action="{{ url_for('doc_process', did=d['id']) }}" class="inline">
+    <input name="note" placeholder="处理意见" style="width:160px">
+    <button class="small" type="submit">办结</button>
+  </form>
   {% endif %}
   <a class="btn small ghost" href="{{ url_for('docs_mine') }}">← 我的发文</a>
 </p>
