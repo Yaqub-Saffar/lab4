@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}起草公文{% endblock %}
+{% block body %}
+<h2>起草公文</h2>
+<p class="hint">正文保存时即用 SM4-CBC 加密；数据密钥用接收方 SM2 公钥封装（数字信封）</p>
+
+<div class="card">
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post">
+    <label>标题</label>
+    <input name="title" value="{{ form.title if form else '' }}" maxlength="100">
+
+    <label>文种</label>
+    <select name="doc_type">
+      {% for t in types %}
+      <option value="{{ t['code'] }}" {% if form and form.doc_type == t['code'] %}selected{% endif %}>{{ t['label'] }}</option>
+      {% endfor %}
+    </select>
+
+    <label>紧急程度</label>
+    <select name="urgency">
+      {% for u in urgs %}
+      <option value="{{ u['code'] }}" {% if form and form.urgency == u['code'] %}selected{% endif %}>{{ u['label'] }}</option>
+      {% endfor %}
+    </select>
+
+    <label>接收人</label>
+    <select name="receiver_id">
+      <option value="">（请选择）</option>
+      {% for u in users %}
+      <option value="{{ u['id'] }}" {% if form and form.receiver_id|string == u['id']|string %}selected{% endif %}>
+        {{ u['real_name'] }}（{{ role_label[u['role']] }}）</option>
+      {% endfor %}
+    </select>
+
+    <label>正文</label>
+    <textarea name="body" rows="10">{{ form.body if form else '' }}</textarea>
+
+    <button type="submit">保存草稿</button>
+  </form>
+  <p class="hint small"><a href="{{ url_for('docs_mine') }}">← 返回我的发文</a></p>
+</div>
+{% endblock %}

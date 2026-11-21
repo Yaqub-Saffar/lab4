@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}待我审核{% endblock %}
+{% block body %}
+<h2>待我审核</h2>
+<p class="hint">只有审核员能进入；审核通过后发文方可发送，退回则回到起草人草稿箱</p>
+
+<div class="card">
+  <table>
+    <tr><th>编号</th><th>标题</th><th>发文</th><th>提交时间</th><th>审核</th></tr>
+    {% for d in docs %}
+    <tr>
+      <td>{{ d['doc_no'] }}</td>
+      <td><a href="{{ url_for('doc_detail', did=d['id']) }}">{{ d['title'] }}</a></td>
+      <td>{{ d['sender_name'] }}</td>
+      <td class="mono">{{ d['submitted_at'] or '—' }}</td>
+      <td>
+        <form method="post" action="{{ url_for('doc_approve', did=d['id']) }}" class="inline">
+          <input name="note" placeholder="审核意见" style="width:140px">
+          <button class="small" type="submit">通过</button>
+        </form>
+        <form method="post" action="{{ url_for('doc_reject', did=d['id']) }}" class="inline">
+          <input name="note" placeholder="退回理由" style="width:140px">
+          <button class="danger small" type="submit">退回</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="hint">暂无待审公文</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

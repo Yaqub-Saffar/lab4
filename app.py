@@ -23,6 +23,15 @@ from flask import (Flask, request, redirect, url_for, session,
 import db
 import crypto_utils as cu
 
+STATUS_LABEL = {
+    "DRAFT": "草稿",
+    "PENDING_REVIEW": "待审核",
+    "APPROVED": "审核通过",
+    "SENT": "已发送",
+    "RECEIVED": "已签收",
+    "PROCESSED": "已处理",
+}
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("APP_SECRET", "lab4-20241422-dev-secret")
 
@@ -462,6 +471,241 @@ def sec_keys_pub(uid):
     return ("-----BEGIN SM2 PUBLIC KEY-----\n%s\n-----END SM2 PUBLIC KEY-----\n"
             % row["sm2_pub"], 200, {"Content-Type": "text/plain; charset=utf-8"})
 
+# ---------------------------------------------------------------- M4 发文
+def _next_doc_no(conn):
+    year = datetime.now().year
+    n = conn.execute("SELECT COUNT(*) FROM doc WHERE doc_no LIKE ?", ("%d-%%" % year,)).fetchone()[0]
+    return "%d-%04d" % (year, n + 1)
+
+
+def _can_view(conn, doc, uid, role):
+    """谁能看这篇公文：发送方、接收方、审核员（待审/已审），三员不可看"""
+    if role in ("SYS_ADMIN", "SEC_ADMIN", "AUDITOR"):
+        return False
+    if doc["sender_id"] == uid or doc["receiver_id"] == uid:
+        return True
+    if role == "REVIEWER" and doc["status"] in ("PENDING_REVIEW", "APPROVED", "SENT",
+                                                "RECEIVED", "PROCESSED"):
+        return True
+    return False
+
+
+@app.route("/doc/new", methods=["GET", "POST"])
+@require_perm("doc.draft")
+def doc_new():
+    conn = db.connect()
+    users = conn.execute("SELECT id, real_name, role FROM user"
+                         " WHERE status='ACTIVE' AND id<>? ORDER BY id",
+                         (session["user"]["id"],)).fetchall()
+    types = conn.execute("SELECT code,label FROM dict_item WHERE type='DOC_TYPE' ORDER BY sort").fetchall()
+    urgs = conn.execute("SELECT code,label FROM dict_item WHERE type='URGENCY' ORDER BY sort").fetchall()
+
+    if request.method == "GET":
+        conn.close()
+        return render_template("doc_new.html", users=users, types=types, urgs=urgs)
+
+    title = request.form.get("title", "").strip()
+    body = request.form.get("body", "").strip()
+    doc_type = request.form.get("doc_type", "NOTICE")
+    urgency = request.form.get("urgency", "NORMAL")
+    receiver_id = request.form.get("receiver_id", "")
+
+    error = None
+    if not title:
+        error = "标题不能为空"
+    elif not body:
+        error = "正文不能为空"
+    elif not receiver_id:
+        error = "请选择接收人"
+    if error:
+        conn.close()
+        return render_template("doc_new.html", users=users, types=types, urgs=urgs,
+                               error=error, form=request.form)
+
+    # 正文加密：随机 DEK + 随机 IV，DEK 用接收方公钥封装（草稿期接收人也看不到，列表只显示 SENT 及之后）
+    receiver = conn.execute("SELECT * FROM user WHERE id=?", (receiver_id,)).fetchone()
+    dek = os.urandom(16)
+    iv = os.urandom(16)
+    ct = cu.sm4_encrypt(dek, body.encode("utf-8"), iv)
+    kek_cipher = cu.sm2_encrypt(receiver["sm2_pub"], dek)          # 接收方一份
+    sender_pub = conn.execute("SELECT sm2_pub FROM user WHERE id=?",
+                              (session["user"]["id"],)).fetchone()["sm2_pub"]
+    kek_cipher_sender = cu.sm2_encrypt(sender_pub, dek)            # 发送方自己一份
+
+    doc_no = _next_doc_no(conn)
+    cur = conn.execute(
+        "INSERT INTO doc(doc_no, title, body_cipher, body_iv, sender_id, receiver_id, status)"
+        " VALUES (?,?,?,?,?,?, 'DRAFT')",
+        (doc_no, title, ct, iv, session["user"]["id"], receiver["id"]))
+    did = cur.lastrowid
+    conn.execute(
+        "INSERT INTO doc_envelope(doc_id, kek_cipher, kek_cipher_sender, signature, signer_id)"
+        " VALUES (?,?,?,?,?)",
+        (did, kek_cipher, kek_cipher_sender, "", None))
+    conn.execute("UPDATE doc SET review_note=? WHERE id=?",
+                 ("类型=%s 紧急度=%s" % (doc_type, urgency), did))
+    conn.commit()
+    audit(conn, "DOC_CREATE", "doc", did, "SUCCESS", "编号 %s，接收人 %s" % (doc_no, receiver["username"]))
+    conn.close()
+    flash("已保存草稿：%s" % doc_no)
+    return redirect(url_for("doc_detail", did=did))
+
+
+@app.route("/docs/mine")
+@require_perm("doc.view_own")
+def docs_mine():
+    q = request.args.get("q", "").strip()
+    status = request.args.get("status", "")
+    sql = ("SELECT d.*, r.real_name AS receiver_name FROM doc d"
+           " LEFT JOIN user r ON r.id=d.receiver_id WHERE d.sender_id=?")
+    args = [session["user"]["id"]]
+    if q:
+        sql += " AND d.title LIKE ?"; args.append("%" + q + "%")
+    if status:
+        sql += " AND d.status=?"; args.append(status)
+    sql += " ORDER BY d.id DESC"
+    conn = db.connect()
+    docs = conn.execute(sql, args).fetchall()
+    conn.close()
+    return render_template("doc_list.html", docs=docs, q=q, status=status,
+                           status_label=STATUS_LABEL)
+
+
+@app.route("/doc/<int:did>")
+@login_required
+def doc_detail(did):
+    conn = db.connect()
+    d = conn.execute("SELECT d.*, s.real_name AS sender_name, r.real_name AS receiver_name,"
+                     " rv.real_name AS reviewer_name"
+                     " FROM doc d LEFT JOIN user s ON s.id=d.sender_id"
+                     " LEFT JOIN user r ON r.id=d.receiver_id"
+                     " LEFT JOIN user rv ON rv.id=d.reviewer_id WHERE d.id=?", (did,)).fetchone()
+    if not d:
+        conn.close(); abort(404)
+    me = session["user"]
+    if not _can_view(conn, d, me["id"], me["role"]):
+        audit(conn, "DOC_VIEW", "doc", did, "DENIED", "无查看权限")
+        conn.close()
+        return render_template("403.html", perm="doc.view"), 403
+    env = conn.execute("SELECT * FROM doc_envelope WHERE doc_id=?", (did,)).fetchone()
+    conn.close()
+    return render_template("doc_detail.html", d=d, env=env, status_label=STATUS_LABEL)
+
+
+@app.route("/doc/<int:did>/body")
+@login_required
+def doc_body(did):
+    """解密查看正文——只对发送方/接收方开放，且必须验签（M6 补）"""
+    conn = db.connect()
+    d = conn.execute("SELECT * FROM doc WHERE id=?", (did,)).fetchone()
+    me = session["user"]
+    if not d or not _can_view(conn, d, me["id"], me["role"]):
+        audit(conn, "DOC_DECRYPT", "doc", did, "DENIED")
+        conn.close(); abort(403)
+    kek = SESS_KEYS.get(session.get("sid"))
+    if not kek:
+        conn.close(); abort(403)
+    env = conn.execute("SELECT * FROM doc_envelope WHERE doc_id=?", (did,)).fetchone()
+    # 发送方用自己那份信封，接收方用另一份——两把钥匙各开各的门
+    if d["sender_id"] == me["id"]:
+        sealed = env["kek_cipher_sender"]
+    else:
+        sealed = env["kek_cipher"]
+    try:
+        dek = cu.sm2_decrypt(kek["priv"],
+                             conn.execute("SELECT sm2_pub FROM user WHERE id=?",
+                                          (me["id"],)).fetchone()["sm2_pub"],
+                             sealed)
+        plain = cu.sm4_decrypt(dek, d["body_iv"], d["body_cipher"]).decode("utf-8")
+    except Exception as e:
+        audit(conn, "DOC_DECRYPT", "doc", did, "FAIL", str(e))
+        conn.close()
+        return "解密失败：%s" % e, 500
+    audit(conn, "DOC_DECRYPT", "doc", did, "SUCCESS")
+    conn.close()
+    return plain, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/doc/<int:did>/submit", methods=["POST"])
+@require_perm("doc.draft")
+def doc_submit(did):
+    conn = db.connect()
+    d = conn.execute("SELECT * FROM doc WHERE id=?", (did,)).fetchone()
+    if d and d["sender_id"] == session["user"]["id"] and d["status"] == "DRAFT":
+        conn.execute("UPDATE doc SET status='PENDING_REVIEW', submitted_at=? WHERE id=?", (now(), did))
+        conn.commit()
+        audit(conn, "DOC_SUBMIT", "doc", did, "SUCCESS", d["doc_no"])
+        flash("已提交审核")
+    else:
+        audit(conn, "DOC_SUBMIT", "doc", did, "DENIED", "状态或归属不符")
+        flash("只能提交自己的草稿")
+    conn.close()
+    return redirect(url_for("doc_detail", did=did))
+
+
+@app.route("/review")
+@require_perm("doc.approve")
+def review_list():
+    conn = db.connect()
+    docs = conn.execute("SELECT d.*, s.real_name AS sender_name FROM doc d"
+                        " LEFT JOIN user s ON s.id=d.sender_id"
+                        " WHERE d.status='PENDING_REVIEW' ORDER BY d.submitted_at").fetchall()
+    conn.close()
+    return render_template("review_list.html", docs=docs)
+
+
+@app.route("/doc/<int:did>/approve", methods=["POST"])
+@require_perm("doc.approve")
+def doc_approve(did):
+    note = request.form.get("note", "").strip()
+    conn = db.connect()
+    d = conn.execute("SELECT * FROM doc WHERE id=?", (did,)).fetchone()
+    if d and d["status"] == "PENDING_REVIEW":
+        conn.execute("UPDATE doc SET status='APPROVED', reviewer_id=?, reviewed_at=?, review_note=?"
+                     " WHERE id=?", (session["user"]["id"], now(), note, did))
+        conn.commit()
+        audit(conn, "DOC_APPROVE", "doc", did, "SUCCESS", "意见：%s" % (note or "无"))
+        flash("已审核通过")
+    else:
+        flash("只能审核待审公文")
+    conn.close()
+    return redirect(url_for("review_list"))
+
+
+@app.route("/doc/<int:did>/reject", methods=["POST"])
+@require_perm("doc.approve")
+def doc_reject(did):
+    note = request.form.get("note", "").strip()
+    conn = db.connect()
+    d = conn.execute("SELECT * FROM doc WHERE id=?", (did,)).fetchone()
+    if d and d["status"] == "PENDING_REVIEW":
+        conn.execute("UPDATE doc SET status='DRAFT', reviewer_id=?, reviewed_at=?, review_note=?"
+                     " WHERE id=?", (session["user"]["id"], now(), "退回：" + (note or "无意见"), did))
+        conn.commit()
+        audit(conn, "DOC_REJECT", "doc", did, "SUCCESS", "退回意见：%s" % (note or "无"))
+        flash("已退回起草人")
+    conn.close()
+    return redirect(url_for("review_list"))
+
+
+@app.route("/doc/<int:did>/send", methods=["POST"])
+@require_perm("doc.send")
+def doc_send(did):
+    """发送：计算 SM3 摘要（签名在 M6 补），状态置 SENT"""
+    conn = db.connect()
+    d = conn.execute("SELECT * FROM doc WHERE id=?", (did,)).fetchone()
+    if d and d["sender_id"] == session["user"]["id"] and d["status"] == "APPROVED":
+        digest = cu.sm3_hex(d["doc_no"].encode() + b"|" + d["body_cipher"])
+        conn.execute("UPDATE doc SET status='SENT', sent_at=?, digest=? WHERE id=?",
+                     (now(), digest, did))
+        conn.commit()
+        audit(conn, "DOC_SEND", "doc", did, "SUCCESS", "摘要 %s…" % digest[:16])
+        flash("已发送，摘要 %s…" % digest[:16])
+    else:
+        audit(conn, "DOC_SEND", "doc", did, "DENIED", "状态或归属不符")
+        flash("只有审核通过的本人公文才能发送")
+    conn.close()
+    return redirect(url_for("doc_detail", did=did))
 if __name__ == "__main__":
     if not os.path.exists(db.DB_PATH):
         db.init_db()

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}公文详情{% endblock %}
+{% block body %}
+<h2>{{ d['title'] }}</h2>
+<p class="hint">编号 {{ d['doc_no'] }}　状态 <b>{{ status_label[d['status']] }}</b>　
+发文 {{ d['sender_name'] }} → 收文 {{ d['receiver_name'] }}</p>
+
+<div class="card">
+  <table>
+    <tr><th>创建时间</th><td>{{ d['created_at'] }}</td><th>提交审核</th><td>{{ d['submitted_at'] or '—' }}</td></tr>
+    <tr><th>审核时间</th><td>{{ d['reviewed_at'] or '—' }}</td><th>审核人</th><td>{{ d['reviewer_name'] or '—' }}</td></tr>
+    <tr><th>发送时间</th><td>{{ d['sent_at'] or '—' }}</td><th>签收时间</th><td>{{ d['received_at'] or '—' }}</td></tr>
+    <tr><th>处理时间</th><td>{{ d['processed_at'] or '—' }}</td><th>SM3 摘要</th><td class="mono">{{ d['digest'] or '—' }}</td></tr>
+    <tr><th>审核意见</th><td colspan="3">{{ d['review_note'] or '—' }}</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h3>正文（解密后）</h3>
+  <pre id="body" class="body-pre">加载中…</pre>
+  <p class="hint small">正文在库中是 SM4 密文，下面这段是请求 <code>/doc/{{ d['id'] }}/body</code> 时用私钥解出的</p>
+  <script>
+    fetch("{{ url_for('doc_body', did=d['id']) }}")
+      .then(r => r.text())
+      .then(t => { document.getElementById('body').textContent = t; })
+      .catch(e => { document.getElementById('body').textContent = '解密失败：' + e; });
+  </script>
+</div>
+
+<div class="card">
+  <h3>密文与信封（库中真实存储）</h3>
+  <table>
+    <tr><th>body_cipher（hex 前 64 字符）</th><td class="mono">{{ (d['body_cipher']|list|length) }} 字节，{{ d['body_cipher'][:32].hex() if d['body_cipher'] else '—' }}…</td></tr>
+    <tr><th>body_iv</th><td class="mono">{{ d['body_iv'].hex() if d['body_iv'] else '—' }}</td></tr>
+    <tr><th>kek_cipher（SM2 信封）</th><td class="mono">{{ env['kek_cipher'][:48].hex() if env else '—' }}…</td></tr>
+    <tr><th>signature</th><td class="mono">{{ env['signature'] or '（待 M6 补签名）' }}</td></tr>
+  </table>
+</div>
+
+<p>
+  {% if d['status'] == 'DRAFT' %}
+  <form method="post" action="{{ url_for('doc_submit', did=d['id']) }}" class="inline">
+    <button class="small" type="submit">提交审核</button>
+  </form>
+  {% elif d['status'] == 'APPROVED' %}
+  <form method="post" action="{{ url_for('doc_send', did=d['id']) }}" class="inline">
+    <button class="small" type="submit">发送</button>
+  </form>
+  {% endif %}
+  <a class="btn small ghost" href="{{ url_for('docs_mine') }}">← 我的发文</a>
+</p>
+{% endblock %}

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}我的发文{% endblock %}
+{% block body %}
+<h2>我的发文</h2>
+<p><a class="btn small" href="{{ url_for('doc_new') }}">＋ 起草公文</a></p>
+
+<div class="card">
+  <form method="get" class="inline-form">
+    <input name="q" value="{{ q }}" placeholder="按标题搜索" style="flex:1">
+    <select name="status">
+      <option value="">全部状态</option>
+      {% for code, label in status_label.items() %}
+      <option value="{{ code }}" {% if status == code %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="small">查询</button>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <tr><th>编号</th><th>标题</th><th>接收人</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+    {% for d in docs %}
+    <tr>
+      <td>{{ d['doc_no'] }}</td>
+      <td><a href="{{ url_for('doc_detail', did=d['id']) }}">{{ d['title'] }}</a></td>
+      <td>{{ d['receiver_name'] or '—' }}</td>
+      <td>{{ status_label[d['status']] }}</td>
+      <td class="mono">{{ d['created_at'] }}</td>
+      <td>
+        <a class="btn small ghost" href="{{ url_for('doc_detail', did=d['id']) }}">详情</a>
+        {% if d['status'] == 'DRAFT' %}
+        <form method="post" action="{{ url_for('doc_submit', did=d['id']) }}" class="inline">
+          <button class="small" type="submit">提交审核</button>
+        </form>
+        {% elif d['status'] == 'APPROVED' %}
+        <form method="post" action="{{ url_for('doc_send', did=d['id']) }}" class="inline"
+              onsubmit="return confirm('确认发送？发送后接收人可签收');">
+          <button class="small" type="submit">发送</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="hint">没有符合条件的公文</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

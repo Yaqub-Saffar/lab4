@@ -51,3 +51,9 @@ td form { margin:0; }
 tr.group-row td { background:#eef2f7; color:#2b4c7e; font-weight:600; }
 td.center { text-align:center; }
 input[type=checkbox] { width:auto; }
+textarea { width:100%; padding:9px 11px; font-size:14px; border:1px solid #dcdfe6;
+  border-radius:6px; font-family:inherit; outline:none; resize:vertical; }
+textarea:focus { border-color:#2b6cb0; }
+.body-pre { background:#f7fafc; border:1px solid #e2e8f0; border-radius:6px;
+  padding:14px; white-space:pre-wrap; word-break:break-word; font-family:inherit;
+  font-size:13px; line-height:1.7; margin:8px 0; max-height:340px; overflow:auto; }

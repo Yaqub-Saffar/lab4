@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS doc (
 CREATE TABLE IF NOT EXISTS doc_envelope (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   doc_id      INTEGER NOT NULL REFERENCES doc(id),
-  kek_cipher  BLOB NOT NULL,
+  kek_cipher        BLOB NOT NULL,  -- 给接收方的 DEK 信封
+  kek_cipher_sender BLOB,          -- 给发送方自己的 DEK 信封（草稿期查看用）
   signature   TEXT NOT NULL,
   signer_id   INTEGER REFERENCES user(id),
   created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
