@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}用户管理{% endblock %}
+{% block body %}
+<h2>用户管理</h2>
+<p class="hint">系统管理员维护账号；建号时自动生成 SM2 密钥对，私钥用该用户口令派生的 KEK 加密</p>
+<p><a class="btn small" href="{{ url_for('user_new') }}">＋ 新建用户</a></p>
+
+<div class="card">
+  <table>
+    <tr><th>ID</th><th>用户名</th><th>姓名</th><th>角色</th><th>单位</th><th>状态</th>
+        <th>公钥（前 16 位）</th><th>操作</th></tr>
+    {% for u in users %}
+    <tr>
+      <td>{{ u['id'] }}</td>
+      <td>{{ u['username'] }}</td>
+      <td>{{ u['real_name'] }}</td>
+      <td>{{ role_label[u['role']] }}</td>
+      <td>{{ u['org_name'] or '—' }}</td>
+      <td>{{ u['status'] }}</td>
+      <td class="mono">{{ u['sm2_pub'][:16] }}…</td>
+      <td>
+        <a class="btn small ghost" href="{{ url_for('user_edit', uid=u['id']) }}">编辑</a>
+        <form method="post" action="{{ url_for('user_reset_pwd', uid=u['id']) }}" class="inline"
+              onsubmit="return confirm('重置口令并轮换密钥？旧私钥将作废');">
+          <input name="new_pwd" placeholder="新口令" style="width:110px">
+          <button class="danger small" type="submit">重置</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

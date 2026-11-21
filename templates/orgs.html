@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}组织单位{% endblock %}
+{% block body %}
+<h2>组织单位管理</h2>
+<p class="hint">系统管理员维护；单位下有用户时不允许删除</p>
+
+<div class="card">
+  <form method="post" class="inline-form">
+    <input name="name" placeholder="新单位名称" style="flex:1">
+    <select name="parent_id">
+      <option value="">（无上级）</option>
+      {% for o in orgs %}<option value="{{ o['id'] }}">{{ o['name'] }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="small">新增单位</button>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <tr><th>ID</th><th>单位名称</th><th>上级单位</th><th>人数</th><th>操作</th></tr>
+    {% for o in orgs %}
+    <tr>
+      <td>{{ o['id'] }}</td>
+      <td>{{ o['name'] }}</td>
+      <td>{{ o['parent_name'] or '—' }}</td>
+      <td>{{ o['user_cnt'] }}</td>
+      <td>
+        <form method="post" action="{{ url_for('org_delete', oid=o['id']) }}"
+              onsubmit="return confirm('确定删除该单位？');">
+          <button class="danger small" type="submit">删除</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

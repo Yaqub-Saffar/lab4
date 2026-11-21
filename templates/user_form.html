@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ '新建用户' if mode == 'new' else '编辑用户' }}{% endblock %}
+{% block body %}
+<h2>{{ '新建用户' if mode == 'new' else '编辑用户：' + user['username'] }}</h2>
+<p class="hint">三员（系统管理员 / 安全保密管理员 / 安全审计员）不得参与公文业务</p>
+
+<div class="card">
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post">
+    {% if mode == 'new' %}
+    <label>用户名（登录名）</label>
+    <input name="username" value="{{ form.username if form else '' }}">
+    {% endif %}
+    <label>姓名</label>
+    <input name="real_name" value="{{ form.real_name if form else (user['real_name'] if user else '') }}">
+    <label>角色</label>
+    <select name="role">
+      {% for code, label in roles.items() %}
+      <option value="{{ code }}"
+        {% if (form and form.role == code) or (user and user['role'] == code) %}selected{% endif %}>
+        {{ label }}</option>
+      {% endfor %}
+    </select>
+    <label>所属单位</label>
+    <select name="org_id">
+      <option value="">（未分配）</option>
+      {% for o in orgs %}
+      <option value="{{ o['id'] }}"
+        {% if (form and form.org_id|string == o['id']|string) or (user and user['org_id'] == o['id']) %}selected{% endif %}>
+        {{ o['name'] }}</option>
+      {% endfor %}
+    </select>
+    {% if mode == 'new' %}
+    <label>初始口令（至少 8 位）</label>
+    <input name="pwd" type="password">
+    {% else %}
+    <label>状态</label>
+    <select name="status">
+      <option value="ACTIVE" {% if user['status'] == 'ACTIVE' %}selected{% endif %}>ACTIVE</option>
+      <option value="DISABLED" {% if user['status'] == 'DISABLED' %}selected{% endif %}>DISABLED</option>
+    </select>
+    {% endif %}
+    <button type="submit">保存</button>
+  </form>
+  <p class="hint small"><a href="{{ url_for('admin_users') }}">← 返回用户列表</a></p>
+</div>
+{% endblock %}

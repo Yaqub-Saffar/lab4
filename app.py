@@ -12,6 +12,7 @@
 """
 import os
 import functools
+import sqlite3
 import time
 import uuid
 from datetime import datetime
@@ -169,6 +170,199 @@ def dashboard():
     return render_template("dashboard.html", stat=stat)
 
 
+# ---------------------------------------------------------------- M2 组织单位
+@app.route("/admin/orgs", methods=["GET", "POST"])
+@require_perm("org.manage")
+def admin_orgs():
+    conn = db.connect()
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        parent = request.form.get("parent_id") or None
+        if not name:
+            flash("单位名称不能为空")
+        else:
+            try:
+                conn.execute("INSERT INTO org_unit(name, parent_id) VALUES (?,?)", (name, parent))
+                conn.commit()
+                audit(conn, "ORG_ADD", "org_unit", name, "SUCCESS", "上级=%s" % (parent or "无"))
+                flash("已新增单位：%s" % name)
+            except sqlite3.IntegrityError:
+                audit(conn, "ORG_ADD", "org_unit", name, "FAIL", "名称重复")
+                flash("单位名称已存在")
+    orgs = conn.execute(
+        "SELECT o.*, (SELECT COUNT(*) FROM user u WHERE u.org_id=o.id) AS user_cnt,"
+        " (SELECT name FROM org_unit p WHERE p.id=o.parent_id) AS parent_name"
+        " FROM org_unit o ORDER BY o.id").fetchall()
+    conn.close()
+    return render_template("orgs.html", orgs=orgs)
+
+
+@app.route("/admin/orgs/<int:oid>/delete", methods=["POST"])
+@require_perm("org.manage")
+def org_delete(oid):
+    conn = db.connect()
+    cnt = conn.execute("SELECT COUNT(*) FROM user WHERE org_id=?", (oid,)).fetchone()[0]
+    if cnt:
+        audit(conn, "ORG_DELETE", "org_unit", oid, "DENIED", "仍有 %d 名用户" % cnt)
+        flash("该单位下还有 %d 名用户，不能删除" % cnt)
+    else:
+        conn.execute("DELETE FROM org_unit WHERE id=?", (oid,))
+        conn.commit()
+        audit(conn, "ORG_DELETE", "org_unit", oid)
+        flash("单位已删除")
+    conn.close()
+    return redirect(url_for("admin_orgs"))
+
+
+# ---------------------------------------------------------------- M2 用户管理
+def _has_business(conn, uid):
+    """该用户是否已经参与过公文业务（三员不得参与业务）"""
+    n = conn.execute(
+        "SELECT (SELECT COUNT(*) FROM doc WHERE sender_id=?) +"
+        "       (SELECT COUNT(*) FROM doc WHERE receiver_id=? )", (uid, uid)).fetchone()[0]
+    return n
+
+
+@app.route("/admin/users")
+@require_perm("user.manage")
+def admin_users():
+    conn = db.connect()
+    users = conn.execute(
+        "SELECT u.*, o.name AS org_name FROM user u LEFT JOIN org_unit o ON o.id=u.org_id"
+        " ORDER BY u.id").fetchall()
+    orgs = conn.execute("SELECT * FROM org_unit ORDER BY id").fetchall()
+    conn.close()
+    return render_template("users.html", users=users, orgs=orgs)
+
+
+@app.route("/admin/users/new", methods=["GET", "POST"])
+@require_perm("user.manage")
+def user_new():
+    conn = db.connect()
+    orgs = conn.execute("SELECT * FROM org_unit ORDER BY id").fetchall()
+    if request.method == "GET":
+        conn.close()
+        return render_template("user_form.html", mode="new", orgs=orgs,
+                               roles=db.ROLE_LABEL, user=None)
+
+    username = request.form.get("username", "").strip()
+    real_name = request.form.get("real_name", "").strip()
+    role = request.form.get("role", "")
+    org_id = request.form.get("org_id") or None
+    pwd = request.form.get("pwd", "")
+
+    error = None
+    if not username or not real_name:
+        error = "用户名与姓名不能为空"
+    elif role not in db.ROLE_PERMS:
+        error = "角色不合法"
+    elif len(pwd) < 8:
+        error = "初始口令至少 8 位"
+
+    if error:
+        conn.close()
+        return render_template("user_form.html", mode="new", orgs=orgs,
+                               roles=db.ROLE_LABEL, user=None, error=error,
+                               form=request.form)
+
+    # 建号即生成密钥对；私钥用该用户口令派生的 KEK 加密
+    salt, pwd_hash = cu.make_pwd(pwd)
+    priv, pub = cu.sm2_keypair()
+    kek = cu.derive_kek(salt, pwd)
+    priv_enc = cu.wrap_privkey(priv, kek)
+    try:
+        conn.execute(
+            "INSERT INTO user(username, real_name, role, org_id, pwd_salt, pwd_hash, sm2_pub, sm2_priv_enc)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (username, real_name, role, org_id, salt, pwd_hash, pub, priv_enc))
+        conn.commit()
+        audit(conn, "USER_ADD", "user", username, "SUCCESS", "角色=%s" % role)
+        flash("已创建用户 %s（%s）" % (username, db.ROLE_LABEL[role]))
+    except sqlite3.IntegrityError:
+        audit(conn, "USER_ADD", "user", username, "FAIL", "用户名重复")
+        conn.close()
+        return render_template("user_form.html", mode="new", orgs=orgs,
+                               roles=db.ROLE_LABEL, user=None, error="用户名已存在",
+                               form=request.form)
+    conn.close()
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/users/<int:uid>/edit", methods=["GET", "POST"])
+@require_perm("user.manage")
+def user_edit(uid):
+    conn = db.connect()
+    row = conn.execute("SELECT * FROM user WHERE id=?", (uid,)).fetchone()
+    orgs = conn.execute("SELECT * FROM org_unit ORDER BY id").fetchall()
+    if not row:
+        conn.close()
+        flash("用户不存在")
+        return redirect(url_for("admin_users"))
+
+    if request.method == "GET":
+        conn.close()
+        return render_template("user_form.html", mode="edit", orgs=orgs,
+                               roles=db.ROLE_LABEL, user=row)
+
+    real_name = request.form.get("real_name", "").strip()
+    role = request.form.get("role", "")
+    org_id = request.form.get("org_id") or None
+    status = request.form.get("status", "ACTIVE")
+
+    error = None
+    THREE = ("SYS_ADMIN", "SEC_ADMIN", "AUDITOR")
+    if role not in db.ROLE_PERMS:
+        error = "角色不合法"
+    elif role in THREE and _has_business(conn, uid) > 0:
+        # 三员分离的具体落地：参与过公文业务的人不能改成三员
+        error = "该用户已参与公文业务，不能调整为三员角色（三员不得参与业务）"
+        audit(conn, "USER_EDIT", "user", uid, "DENIED", "三员互斥：已有业务数据")
+    elif row["role"] in THREE and role not in THREE and _has_business(conn, uid) > 0:
+        error = "该用户已参与公文业务，不能调整为业务岗"
+        audit(conn, "USER_EDIT", "user", uid, "DENIED", "业务岗互斥")
+
+    if error:
+        conn.close()
+        return render_template("user_form.html", mode="edit", orgs=orgs,
+                               roles=db.ROLE_LABEL, user=row, error=error)
+
+    conn.execute("UPDATE user SET real_name=?, role=?, org_id=?, status=? WHERE id=?",
+                 (real_name, role, org_id, status, uid))
+    conn.commit()
+    audit(conn, "USER_EDIT", "user", uid, "SUCCESS",
+          "角色=%s 状态=%s" % (role, status))
+    conn.close()
+    flash("已保存用户 %s" % row["username"])
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/users/<int:uid>/reset_pwd", methods=["POST"])
+@require_perm("user.manage")
+def user_reset_pwd(uid):
+    """重置口令：换盐换哈希，同时轮换密钥对（旧私钥作废）"""
+    new_pwd = request.form.get("new_pwd", "")
+    conn = db.connect()
+    row = conn.execute("SELECT * FROM user WHERE id=?", (uid,)).fetchone()
+    if not row:
+        conn.close()
+        flash("用户不存在")
+        return redirect(url_for("admin_users"))
+    if len(new_pwd) < 8:
+        conn.close()
+        flash("新口令至少 8 位")
+        return redirect(url_for("admin_users"))
+
+    salt, pwd_hash = cu.make_pwd(new_pwd)
+    priv, pub = cu.sm2_keypair()
+    kek = cu.derive_kek(salt, new_pwd)
+    priv_enc = cu.wrap_privkey(priv, kek)
+    conn.execute("UPDATE user SET pwd_salt=?, pwd_hash=?, sm2_pub=?, sm2_priv_enc=? WHERE id=?",
+                 (salt, pwd_hash, pub, priv_enc, uid))
+    conn.commit()
+    audit(conn, "USER_RESET_PWD", "user", row["username"], "SUCCESS", "口令与密钥已轮换")
+    conn.close()
+    flash("已重置 %s 的口令，并轮换其密钥对" % row["username"])
+    return redirect(url_for("admin_users"))
 if __name__ == "__main__":
     if not os.path.exists(db.DB_PATH):
         db.init_db()

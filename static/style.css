@@ -34,3 +34,17 @@ table { width:100%; border-collapse:collapse; font-size:13px; }
 th, td { border:1px solid #e4e7ed; padding:8px 10px; text-align:left; }
 th { background:#f5f7fa; }
 .footer { text-align:center; color:#9aa5b1; font-size:12px; padding:26px 0; }
+.inline-form { display:flex; gap:10px; align-items:center; }
+.inline-form input, .inline-form select { flex:0 0 auto; }
+.inline-form input[name=name] { flex:1; }
+select { padding:9px 11px; font-size:14px; border:1px solid #dcdfe6; border-radius:6px; background:#fff; }
+button.small, .btn.small { width:auto; margin:0; padding:6px 12px; font-size:13px; }
+.btn { display:inline-block; background:#2b6cb0; color:#fff; border-radius:6px; text-decoration:none;
+  padding:8px 14px; font-size:14px; }
+.btn.ghost { background:#fff; color:#2b6cb0; border:1px solid #bcd4ee; }
+button.danger { background:#fff; color:#c53030; border:1px solid #feb2b2; }
+button.danger:hover { background:#fff5f5; }
+form.inline { display:inline-flex; gap:6px; align-items:center; margin-left:6px; }
+td .btn.small { margin-right:4px; }
+.mono { font-family:Consolas,monospace; font-size:12px; color:#606266; }
+td form { margin:0; }
