@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}权限设置{% endblock %}
+{% block body %}
+<h2>角色权限设置</h2>
+<p class="hint">安全保密管理员维护；保存后立即生效（每次请求都会重新读取权限表）</p>
+
+<form method="post">
+<div class="card">
+  <table>
+    <tr>
+      <th style="width:200px">权限项</th>
+      {% for role, label in role_label.items() %}<th>{{ label }}</th>{% endfor %}
+    </tr>
+    {% for gname, codes in groups.items() %}
+    <tr class="group-row"><td colspan="{{ role_label|length + 1 }}">{{ gname }}</td></tr>
+      {% for code in codes %}
+      <tr>
+        <td><code>{{ code }}</code><br><span class="hint">{{ perm_label[code] }}</span></td>
+        {% for role in role_label %}
+        <td class="center">
+          <input type="checkbox" name="grant" value="{{ role }}|{{ code }}"
+                 {% if role in grant.get(code, []) %}checked{% endif %}>
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    {% endfor %}
+  </table>
+</div>
+<button type="submit" class="small">保存权限</button>
+</form>
+{% endblock %}

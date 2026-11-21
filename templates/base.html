@@ -15,7 +15,8 @@
     {% if 'doc.receive' in perms %}<a href="#">收文</a>{% endif %}
     {% if 'org.manage' in perms %}<a href="{{ url_for('admin_orgs') }}">组织单位</a>{% endif %}
     {% if 'user.manage' in perms %}<a href="{{ url_for('admin_users') }}">用户管理</a>{% endif %}
-    {% if 'perm.manage' in perms %}<a href="#">权限与密钥</a>{% endif %}
+    {% if 'perm.manage' in perms %}<a href="{{ url_for('sec_perms') }}">权限设置</a>{% endif %}
+    {% if 'key.manage' in perms %}<a href="{{ url_for('sec_keys') }}">密钥管理</a>{% endif %}
     {% if 'log.view' in perms %}<a href="#">系统日志</a>{% endif %}
   </div>
   <div class="me">{{ user.real_name }}（{{ role_label[user.role] }}）

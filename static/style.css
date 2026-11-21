@@ -48,3 +48,6 @@ form.inline { display:inline-flex; gap:6px; align-items:center; margin-left:6px;
 td .btn.small { margin-right:4px; }
 .mono { font-family:Consolas,monospace; font-size:12px; color:#606266; }
 td form { margin:0; }
+tr.group-row td { background:#eef2f7; color:#2b4c7e; font-weight:600; }
+td.center { text-align:center; }
+input[type=checkbox] { width:auto; }

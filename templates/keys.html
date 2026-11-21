@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}密钥管理{% endblock %}
+{% block body %}
+<h2>密钥管理</h2>
+<p class="hint">当前系统密钥版本：<b>v{{ key_version }}</b>　
+库里保存的是私钥密文（SM4-CBC 包装），明文私钥只在用户登录后的内存中</p>
+
+<div class="card">
+  <table>
+    <tr><th>ID</th><th>用户</th><th>角色</th><th>公钥（前 24 位）</th>
+        <th>私钥密文长度</th><th>操作</th></tr>
+    {% for u in users %}
+    <tr>
+      <td>{{ u['id'] }}</td>
+      <td>{{ u['username'] }}（{{ u['real_name'] }}）</td>
+      <td>{{ role_label[u['role']] }}</td>
+      <td class="mono">{{ u['sm2_pub'][:24] }}…</td>
+      <td>{{ u['enc_len'] }} 字符（base64）</td>
+      <td><a class="btn small ghost" href="{{ url_for('sec_keys_pub', uid=u['id']) }}" target="_blank">导出公钥</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<form method="post" action="{{ url_for('sec_keys_rotate') }}"
+      onsubmit="return confirm('轮换系统密钥版本？数据密钥将按新版本标记');">
+  <button type="submit" class="small">轮换系统密钥版本</button>
+</form>
+
+<div class="card">
+  <h3>密钥生命周期</h3>
+  <table>
+    <tr><th>阶段</th><th>本系统做法</th></tr>
+    <tr><td>生成</td><td>建号时生成 SM2 密钥对（用户侧），公文发送时随机生成 DEK（数据侧）</td></tr>
+    <tr><td>存储</td><td>私钥用口令派生的 KEK 做 SM4 加密后存库；DEK 以 SM2 信封形式存</td></tr>
+    <tr><td>使用</td><td>登录时解封到内存，登出即清除；不写 cookie、不落盘</td></tr>
+    <tr><td>轮换</td><td>重置口令即轮换密钥对；系统密钥版本可整体提升</td></tr>
+    <tr><td>销毁</td><td>删除账号时私钥密文一并删除并记审计</td></tr>
+    <tr><td>备份</td><td>只备份私钥密文与公钥，明文私钥永不导出</td></tr>
+  </table>
+</div>
+{% endblock %}

@@ -110,6 +110,28 @@ ROLE_LABEL = {
     "AUDITOR": "安全审计员",
 }
 
+
+# 权限编码 → 中文说明（权限设置页与文档共用）
+PERM_LABEL = {
+    "doc.draft": "起草公文",
+    "doc.view_own": "查看本人公文",
+    "doc.approve": "发文审核",
+    "doc.send": "发送公文",
+    "doc.receive": "接收公文",
+    "doc.sign": "签收 / 处理",
+    "org.manage": "组织单位管理",
+    "user.manage": "用户账号管理",
+    "perm.manage": "角色权限分配",
+    "key.manage": "密钥管理",
+    "log.view": "审计日志查看",
+}
+
+PERM_GROUPS = {
+    "公文业务": ["doc.draft", "doc.view_own", "doc.approve", "doc.send", "doc.receive", "doc.sign"],
+    "系统管理": ["org.manage", "user.manage"],
+    "安全保密": ["perm.manage", "key.manage"],
+    "审计监督": ["log.view"],
+}
 SEED_USERS = [
     ("keyuan", "王五", "OPERATOR", "教务处"),
     ("shenhe", "李四", "REVIEWER", "教务处"),

@@ -81,6 +81,15 @@ def require_perm(code):
     return deco
 
 
+@app.before_request
+def refresh_perms():
+    """每次请求都从库里读当前角色的权限——权限一改立即生效，不用重新登录"""
+    if session.get("user"):
+        conn = db.connect()
+        session["perms"] = [r["perm_code"] for r in conn.execute(
+            "SELECT perm_code FROM role_permission WHERE role=?", (session["user"]["role"],))]
+        conn.close()
+
 @app.context_processor
 def inject_globals():
     return dict(perms=current_perms(), role_label=db.ROLE_LABEL,
@@ -363,6 +372,96 @@ def user_reset_pwd(uid):
     conn.close()
     flash("已重置 %s 的口令，并轮换其密钥对" % row["username"])
     return redirect(url_for("admin_users"))
+# ---------------------------------------------------------------- M3 权限设置（安全保密管理员）
+@app.route("/sec/perms", methods=["GET", "POST"])
+@require_perm("perm.manage")
+def sec_perms():
+    conn = db.connect()
+    if request.method == "POST":
+        # 表单里每个勾选项形如 "ROLE|perm.code"
+        chosen = {}
+        for code in db.PERM_LABEL:
+            chosen[code] = set()
+        for key in request.form.getlist("grant"):
+            role, code = key.split("|", 1)
+            chosen.setdefault(code, set()).add(role)
+
+        before = {}
+        for r in conn.execute("SELECT role, perm_code FROM role_permission"):
+            before.setdefault(r["role"], set()).add(r["perm_code"])
+
+        for role in db.ROLE_PERMS:
+            old = before.get(role, set())
+            new = {c for c, roles in chosen.items() if role in roles}
+            for code in new - old:
+                conn.execute("INSERT OR IGNORE INTO role_permission(role, perm_code) VALUES (?,?)",
+                             (role, code))
+            for code in old - new:
+                conn.execute("DELETE FROM role_permission WHERE role=? AND perm_code=?",
+                             (role, code))
+        conn.commit()
+        diff = []
+        for role in db.ROLE_PERMS:
+            old = before.get(role, set()); new = {c for c, roles in chosen.items() if role in roles}
+            if old != new:
+                diff.append("%s %+d" % (role, len(new) - len(old)))
+        audit(conn, "PERM_UPDATE", "role_permission", "all", "SUCCESS", "变更：" + (";".join(diff) or "无"))
+        flash("权限已保存（立即生效）")
+        conn.close()
+        return redirect(url_for("sec_perms"))
+
+    grant = {}
+    for r in conn.execute("SELECT role, perm_code FROM role_permission"):
+        grant.setdefault(r["perm_code"], set()).add(r["role"])
+    conn.close()
+    return render_template("perms.html", groups=db.PERM_GROUPS, perm_label=db.PERM_LABEL,
+                           role_label=db.ROLE_LABEL, grant=grant)
+
+
+# ---------------------------------------------------------------- M3 密钥管理（安全保密管理员）
+@app.route("/sec/keys")
+@require_perm("key.manage")
+def sec_keys():
+    conn = db.connect()
+    users = conn.execute(
+        "SELECT u.id, u.username, u.real_name, u.role, u.sm2_pub, u.sm2_priv_enc,"
+        " length(u.sm2_priv_enc) AS enc_len FROM user u ORDER BY u.id").fetchall()
+    keyver = conn.execute("SELECT value FROM sys_config WHERE key='key_version'").fetchone()
+    conn.close()
+    return render_template("keys.html", users=users,
+                           key_version=keyver["value"] if keyver else "1")
+
+
+@app.route("/sec/keys/rotate", methods=["POST"])
+@require_perm("key.manage")
+def sec_keys_rotate():
+    conn = db.connect()
+    row = conn.execute("SELECT value FROM sys_config WHERE key='key_version'").fetchone()
+    old = int(row["value"]) if row else 1
+    new = old + 1
+    conn.execute("INSERT INTO sys_config(key,value) VALUES ('key_version',?)"
+                 " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(new),))
+    conn.commit()
+    audit(conn, "KEY_ROTATE", "sys_config", "key_version", "SUCCESS", "由 %d 升到 %d" % (old, new))
+    conn.close()
+    flash("系统密钥版本已由 %d 轮换为 %d" % (old, new))
+    return redirect(url_for("sec_keys"))
+
+
+@app.route("/sec/keys/<int:uid>/pub")
+@require_perm("key.manage")
+def sec_keys_pub(uid):
+    """导出用户公钥（公钥本就是公开的，私钥永不导出）"""
+    conn = db.connect()
+    row = conn.execute("SELECT username, sm2_pub FROM user WHERE id=?", (uid,)).fetchone()
+    if row:
+        audit(conn, "KEY_EXPORT_PUB", "user", row["username"])
+    conn.close()
+    if not row:
+        abort(404)
+    return ("-----BEGIN SM2 PUBLIC KEY-----\n%s\n-----END SM2 PUBLIC KEY-----\n"
+            % row["sm2_pub"], 200, {"Content-Type": "text/plain; charset=utf-8"})
+
 if __name__ == "__main__":
     if not os.path.exists(db.DB_PATH):
         db.init_db()
