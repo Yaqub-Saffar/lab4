@@ -1,0 +1,19 @@
+[
+  {"file": "01-登录页.png", "path": "/login", "role": null, "wait": 1.5},
+  {"file": "02-工作台-操作员.png", "path": "/", "role": "keyuan"},
+  {"file": "03-起草公文.png", "path": "/doc/new", "role": "keyuan"},
+  {"file": "04-公文详情-已发送验签通过.png", "path": "/doc/{b}", "role": "keyuan", "wait": 2.0},
+  {"file": "05-公文详情-已办结全流程.png", "path": "/doc/{a}", "role": "keyuan", "wait": 2.0},
+  {"file": "06-我的发文-查询.png", "path": "/docs/mine", "role": "keyuan"},
+  {"file": "07-待审列表-审核员.png", "path": "/review", "role": "shenhe"},
+  {"file": "08-收文列表-待签收.png", "path": "/inbox", "role": "shenhe"},
+  {"file": "09-收文列表-已处理.png", "path": "/inbox?status=PROCESSED", "role": "shenhe"},
+  {"file": "10-组织单位管理.png", "path": "/admin/orgs", "role": "sysadmin"},
+  {"file": "11-用户管理.png", "path": "/admin/users", "role": "sysadmin"},
+  {"file": "12-权限矩阵.png", "path": "/sec/perms", "role": "secadmin", "wait": 1.6},
+  {"file": "13-密钥管理.png", "path": "/sec/keys", "role": "secadmin"},
+  {"file": "14-审计日志.png", "path": "/logs", "role": "auditor", "wait": 1.6},
+  {"file": "15-审计日志-DENIED筛选.png", "path": "/logs?result=DENIED", "role": "auditor", "wait": 1.6},
+  {"file": "16-越权403.png", "path": "/admin/users", "role": "keyuan"},
+  {"file": "17-公文详情-密文与信封.png", "path": "/doc/{b}", "role": "keyuan", "wait": 2.0, "height": 1750}
+]
