@@ -16,6 +16,19 @@
 </div>
 
 <div class="card">
+  <h3>验签结果</h3>
+  {% if verify_ok is none %}
+    <p class="hint">{{ verify_msg }}</p>
+  {% elif verify_ok %}
+    <p class="ok">✔ {{ verify_msg }}（SM3 摘要一致 + SM2 签名有效）</p>
+  {% else %}
+    <p class="error">✘ {{ verify_msg }}</p>
+  {% endif %}
+  <p class="hint small">摘要 = SM3(编号 ‖ 正文密文 ‖ IV)；签名 = SM2(发送方私钥, 摘要)。
+    任何一处被改动，摘要就对不上，签收会被拒绝。</p>
+</div>
+
+<div class="card">
   <h3>正文（解密后）</h3>
   <pre id="body" class="body-pre">加载中…</pre>
   <p class="hint small">正文在库中是 SM4 密文，下面这段是请求 <code>/doc/{{ d['id'] }}/body</code> 时用私钥解出的</p>

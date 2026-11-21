@@ -471,6 +471,26 @@ def sec_keys_pub(uid):
     return ("-----BEGIN SM2 PUBLIC KEY-----\n%s\n-----END SM2 PUBLIC KEY-----\n"
             % row["sm2_pub"], 200, {"Content-Type": "text/plain; charset=utf-8"})
 
+# ---------------------------------------------------------------- M6 摘要与验签
+def _doc_digest(d):
+    """摘要绑定：文档编号 + 正文密文 + IV —— 任何一处改动都会让摘要变化"""
+    return cu.sm3_hex(d["doc_no"].encode("utf-8") + b"|" +
+                      bytes(d["body_cipher"]) + b"|" + bytes(d["body_iv"]))
+
+
+def _verify_doc(conn, d, env):
+    """返回 (是否通过, 说明)。先比对摘要是否被改，再验 SM2 签名"""
+    if not env or not env["signature"]:
+        return False, "未签名"
+    digest_now = _doc_digest(d)
+    if d["digest"] != digest_now:
+        return False, "摘要不一致（正文或编号被改动）"
+    sender = conn.execute("SELECT sm2_pub FROM user WHERE id=?", (d["sender_id"],)).fetchone()
+    if not sender:
+        return False, "找不到发送方公钥"
+    ok = cu.sm2_verify(sender["sm2_pub"], env["signature"], digest_now.encode("utf-8"))
+    return (True, "验签通过") if ok else (False, "SM2 验签失败（签名与内容不匹配）")
+
 # ---------------------------------------------------------------- M4 发文
 def _next_doc_no(conn):
     year = datetime.now().year
@@ -588,8 +608,12 @@ def doc_detail(did):
         conn.close()
         return render_template("403.html", perm="doc.view"), 403
     env = conn.execute("SELECT * FROM doc_envelope WHERE doc_id=?", (did,)).fetchone()
+    verify_ok, verify_msg = (None, "草稿未签名")
+    if env and env["signature"]:
+        verify_ok, verify_msg = _verify_doc(conn, d, env)
     conn.close()
-    return render_template("doc_detail.html", d=d, env=env, status_label=STATUS_LABEL)
+    return render_template("doc_detail.html", d=d, env=env, status_label=STATUS_LABEL,
+                           verify_ok=verify_ok, verify_msg=verify_msg)
 
 
 @app.route("/doc/<int:did>/body")
@@ -695,12 +719,22 @@ def doc_send(did):
     conn = db.connect()
     d = conn.execute("SELECT * FROM doc WHERE id=?", (did,)).fetchone()
     if d and d["sender_id"] == session["user"]["id"] and d["status"] == "APPROVED":
-        digest = cu.sm3_hex(d["doc_no"].encode() + b"|" + d["body_cipher"])
+        digest = _doc_digest(d)
+        sess_key = SESS_KEYS.get(session.get("sid"))
+        if not sess_key:
+            conn.close()
+            return "会话密钥已失效，请重新登录后再发送", 403
+        sender_pub = conn.execute("SELECT sm2_pub FROM user WHERE id=?",
+                                  (d["sender_id"],)).fetchone()["sm2_pub"]
+        signature = cu.sm2_sign(sess_key["priv"], sender_pub, digest.encode("utf-8"))
         conn.execute("UPDATE doc SET status='SENT', sent_at=?, digest=? WHERE id=?",
                      (now(), digest, did))
+        conn.execute("UPDATE doc_envelope SET signature=?, signer_id=? WHERE doc_id=?",
+                     (signature, d["sender_id"], did))
         conn.commit()
-        audit(conn, "DOC_SEND", "doc", did, "SUCCESS", "摘要 %s…" % digest[:16])
-        flash("已发送，摘要 %s…" % digest[:16])
+        audit(conn, "DOC_SEND", "doc", did, "SUCCESS",
+              "摘要 %s… 已签名（%d 字符）" % (digest[:16], len(signature)))
+        flash("已发送并签名，摘要 %s…" % digest[:16])
     else:
         audit(conn, "DOC_SEND", "doc", did, "DENIED", "状态或归属不符")
         flash("只有审核通过的本人公文才能发送")
@@ -734,11 +768,19 @@ def doc_sign(did):
     """签收：只有接收人、且状态为已发送时可签收"""
     conn = db.connect()
     d = conn.execute("SELECT * FROM doc WHERE id=?", (did,)).fetchone()
+    env = conn.execute("SELECT * FROM doc_envelope WHERE doc_id=?", (did,)).fetchone() if d else None
     if d and d["receiver_id"] == session["user"]["id"] and d["status"] == "SENT":
+        ok, why = _verify_doc(conn, d, env)
+        if not ok:
+            # 验签不通过就不允许签收——这是"抗抵赖 + 完整性"的落地
+            audit(conn, "DOC_SIGN", "doc", did, "DENIED", "验签未通过：" + why)
+            flash("签收被拒绝：%s" % why)
+            conn.close()
+            return redirect(url_for("doc_detail", did=did))
         conn.execute("UPDATE doc SET status='RECEIVED', received_at=? WHERE id=?", (now(), did))
         conn.commit()
-        audit(conn, "DOC_SIGN", "doc", did, "SUCCESS", d["doc_no"])
-        flash("已签收")
+        audit(conn, "DOC_SIGN", "doc", did, "SUCCESS", "%s，验签通过" % d["doc_no"])
+        flash("已签收（验签通过）")
     else:
         audit(conn, "DOC_SIGN", "doc", did, "DENIED", "非接收人或状态不符")
         flash("只有接收人才能签收已发送的公文")
