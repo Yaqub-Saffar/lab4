@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}无权访问{% endblock %}
+{% block body %}
+<div class="card">
+  <h2>403 无权访问</h2>
+  <p class="error">当前角色缺少权限：<code>{{ perm }}</code></p>
+  <p class="hint">本次越权访问已写入审计日志。</p>
+  <p><a href="{{ url_for('dashboard') }}">返回工作台</a></p>
+</div>
+{% endblock %}

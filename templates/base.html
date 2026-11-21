@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{% block title %}电子公文交换系统{% endblock %} · 20241422 穆弈涵</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+{% if user %}
+<div class="topbar">
+  <div class="brand">电子公文交换系统</div>
+  <div class="nav">
+    <a href="{{ url_for('dashboard') }}">工作台</a>
+    {% if 'doc.draft' in perms %}<a href="#">发文</a>{% endif %}
+    {% if 'doc.receive' in perms %}<a href="#">收文</a>{% endif %}
+    {% if 'org.manage' in perms or 'user.manage' in perms %}<a href="#">系统管理</a>{% endif %}
+    {% if 'perm.manage' in perms %}<a href="#">权限与密钥</a>{% endif %}
+    {% if 'log.view' in perms %}<a href="#">系统日志</a>{% endif %}
+  </div>
+  <div class="me">{{ user.real_name }}（{{ role_label[user.role] }}）
+    <a class="out" href="{{ url_for('logout') }}">退出</a></div>
+</div>
+{% endif %}
+<div class="wrap">
+  {% with msgs = get_flashed_messages() %}
+    {% for m in msgs %}<p class="ok">{{ m }}</p>{% endfor %}
+  {% endwith %}
+  {% block body %}{% endblock %}
+</div>
+<div class="footer">20241422 穆弈涵 · 《密码系统设计》实验四 · 密码模块的应用</div>
+</body>
+</html>
